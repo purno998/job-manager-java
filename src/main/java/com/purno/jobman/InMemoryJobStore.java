@@ -41,7 +41,7 @@ public class InMemoryJobStore  implements JobStore {
         Instant now = Instant.now();
         return jobs.values().stream()
                 .filter(j -> j.getState() == JobState.INIT)
-                .filter(j -> j.getScheduledTime() == null || j.getScheduledTime().compareTo(now) >= 0)
+                .filter(j -> j.getScheduledTime() == null || j.getScheduledTime().compareTo(now) <= 0)
                 .sorted((j1, j2) -> Long.compare(j2.getId(), j1.getId()))
                 .toList();
     }
