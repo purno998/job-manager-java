@@ -11,7 +11,7 @@ public interface JobStore {
 
     List<Job<?>> getAll();
 
-    List<Job<?>> getForRunningNow();
+    List<Job<?>> getForRunningNow(boolean includeHeavyWeight);
 
     long count();
 }

@@ -38,10 +38,11 @@ public class SqlJobStore implements JobStore {
             String sql = String.format(
                     "CREATE TABLE IF NOT EXISTS jobs (" +
                             "id %s, " +
-                            "name VARCHAR(255), " +
-                            "state VARCHAR(50), " +
+                            "name VARCHAR(255) NULL, " +
+                            "state VARCHAR(50) NOT NULL, " +
                             "scheduled_time TIMESTAMP NULL, " +
                             "implementation_class VARCHAR(500) NOT NULL, " +
+                            "heavy_weight SMALLINT NOT NULL, " +
                             "job_json TEXT NOT NULL" +
                             ")", idColumnDefinition);
 
@@ -66,7 +67,7 @@ public class SqlJobStore implements JobStore {
     }
 
     private void insert(Job<?> job) {
-        String sql = "INSERT INTO jobs (name, state, scheduled_time, implementation_class, job_json) VALUES (?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO jobs (name, state, scheduled_time, implementation_class, heavy_weight, job_json) VALUES (?, ?, ?, ?, ?, ?)";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
@@ -86,12 +87,12 @@ public class SqlJobStore implements JobStore {
     }
 
     private void update(Job<?> job) {
-        String sql = "UPDATE jobs SET name= ?, state= ?, scheduled_time= ?, implementation_class= ?, job_json= ? WHERE id = ?";
+        String sql = "UPDATE jobs SET name= ?, state= ?, scheduled_time= ?, implementation_class= ?, heavy_weight= ?, job_json= ? WHERE id = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             prepareParams(ps, job);
-            ps.setLong(6, job.getId());
+            ps.setLong(7, job.getId());
             ps.executeUpdate();
         } catch (Exception e) {
             throw new RuntimeException("Error updating job " + job.getId(), e);
@@ -103,14 +104,15 @@ public class SqlJobStore implements JobStore {
         ps.setString(2, job.getState() != null ? job.getState().name() : null);
         ps.setTimestamp(3, job.getScheduledTime() != null ? Timestamp.from(job.getScheduledTime()) : null);
         ps.setString(4, job.getClass().getName());
-        ps.setString(5, objectMapper.writeValueAsString(job));
+        ps.setInt(5, job.isHeavyWeight() ? 1 : 0);
+        ps.setString(6, objectMapper.writeValueAsString(job));
     }
 
     @Override
     public Job<?> get(long jobId) {
         createTable();
 
-        String sql = "SELECT implementation_class, job_json FROM jobs WHERE id = ?";
+        String sql = "SELECT id, implementation_class, job_json FROM jobs WHERE id = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -132,7 +134,7 @@ public class SqlJobStore implements JobStore {
     public List<Job<?>> getAll() {
         createTable();
 
-        String sql = "SELECT implementation_class, job_json FROM jobs ORDER BY id";
+        String sql = "SELECT id, implementation_class, job_json FROM jobs ORDER BY id";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -145,10 +147,14 @@ public class SqlJobStore implements JobStore {
     }
 
     @Override
-    public List<Job<?>> getForRunningNow() {
+    public List<Job<?>> getForRunningNow(boolean includeHeavyWeight) {
         createTable();
 
-        String sql = "SELECT implementation_class, job_json FROM jobs WHERE state = ? AND (scheduled_time IS NULL OR scheduled_time <= ?) ORDER BY id";
+        String sql = "SELECT id, implementation_class, job_json FROM jobs WHERE state = ? AND (scheduled_time IS NULL OR scheduled_time <= ?)";
+        if (!includeHeavyWeight) {
+            sql += " AND heavy_weight = 0";
+        }
+        sql += " ORDER BY id";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {

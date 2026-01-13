@@ -7,25 +7,27 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 @Slf4j
 public class JobManager {
-    private static final int HEAVY_WEIGHT_JOB_LIMIT = 10;
-
     private final JobStore jobStore;
     private final Consumer<Job<?>> progressConsumer;
+    private final int heavyWeightJobLimit;
 
     private final ScheduledExecutorService jobRunner = Executors.newScheduledThreadPool(1);
     private final ExecutorService jobExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private final Map<Long, Thread> jobThreads = new ConcurrentHashMap<>();
-    private final AtomicInteger heavyWeightJobCount = new AtomicInteger(0);
+    private int heavyWeightJobCount = 0;
 
-    public JobManager(JobStore jobStore, Consumer<Job<?>> progressConsumer) {
+    public JobManager(JobStore jobStore, Consumer<Job<?>> progressConsumer, int heavyWeightJobLimit) {
         this.jobStore = jobStore == null ? new InMemoryJobStore() : jobStore;
         this.progressConsumer = progressConsumer == null ? this::logProgress : progressConsumer;
-        jobRunner.scheduleWithFixedDelay(this::run, 2, 5, TimeUnit.SECONDS);
+        this.heavyWeightJobLimit = heavyWeightJobLimit > 0
+                ? heavyWeightJobLimit
+                : Runtime.getRuntime().availableProcessors();
+
+        jobRunner.scheduleWithFixedDelay(this::run, 0, 5, TimeUnit.SECONDS);
     }
 
     private void logProgress(Job<?> job) {
@@ -34,13 +36,10 @@ public class JobManager {
 
     private void run() {
         try {
-            for (Job<?> job : jobStore.getForRunningNow()) {
+            boolean includeHeavyWeight = heavyWeightJobCount < heavyWeightJobLimit;
+            for (Job<?> job : jobStore.getForRunningNow(includeHeavyWeight)) {
                 if (job.isHeavyWeight()) {
-                    if (heavyWeightJobCount.get() < HEAVY_WEIGHT_JOB_LIMIT) {
-                        heavyWeightJobCount.incrementAndGet();
-                    } else {
-                        continue;
-                    }
+                    heavyWeightJobCount++;
                 }
 
                 job.setState(JobState.WAITING);
@@ -73,17 +72,22 @@ public class JobManager {
 
             job.run();
 
+            job = jobStore.get(job.getId());
             if (job.getState() == JobState.RUNNING) {
                 job.setState(JobState.SUCCESSFUL);
                 job.setMessage("Success");
             }
         }  catch (Exception e) {
+            job = jobStore.get(job.getId());
             if (job.getState() == JobState.RUNNING) {
                 job.setState(JobState.FAILED);
                 job.setMessage("Failed: "  + e.getMessage());
             }
         } finally {
             jobThreads.remove(job.getId());
+            if (job.isHeavyWeight()) {
+                heavyWeightJobCount--;
+            }
 
             Instant end = Instant.now();
             if (job.getState().isDone()) {

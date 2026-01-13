@@ -37,11 +37,12 @@ public class InMemoryJobStore  implements JobStore {
     }
 
     @Override
-    public List<Job<?>> getForRunningNow() {
+    public List<Job<?>> getForRunningNow(boolean includeHeavyWeight) {
         Instant now = Instant.now();
         return jobs.values().stream()
                 .filter(j -> j.getState() == JobState.INIT)
                 .filter(j -> j.getScheduledTime() == null || j.getScheduledTime().compareTo(now) <= 0)
+                .filter(j -> !j.isHeavyWeight() || includeHeavyWeight)
                 .sorted((j1, j2) -> Long.compare(j2.getId(), j1.getId()))
                 .toList();
     }

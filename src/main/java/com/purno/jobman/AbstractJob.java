@@ -14,7 +14,7 @@ public abstract class AbstractJob<R> implements Job<R> {
     private long id;
     private String name;
     private String description;
-    private JobState state;
+    private JobState state =  JobState.INIT;
     private String message;
     private boolean heavyWeight;
     private boolean cancelable;
