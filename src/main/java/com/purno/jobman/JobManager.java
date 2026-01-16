@@ -17,7 +17,7 @@ public class JobManager {
 
     private final ScheduledExecutorService jobRunner = Executors.newScheduledThreadPool(1);
     private final ExecutorService jobExecutor = Executors.newVirtualThreadPerTaskExecutor();
-    private final Map<Long, Thread> jobThreads = new ConcurrentHashMap<>();
+    private final Map<Long, RunningJob> runningJobs = new ConcurrentHashMap<>();
     private int heavyWeightJobCount = 0;
 
     public JobManager(JobStore jobStore, Consumer<Job<?>> progressConsumer, int heavyWeightJobLimit) {
@@ -44,7 +44,7 @@ public class JobManager {
 
                 job.setState(JobState.WAITING);
                 job.setMessage("Waiting");
-                reportProgress(job);
+                saveAndReportProgress(job);
 
                 jobExecutor.execute(() -> execute(job));
             }
@@ -54,11 +54,11 @@ public class JobManager {
     }
 
     private void execute(Job<?> job) {
-        if (jobThreads.containsKey(job.getId())) {
+        if (runningJobs.containsKey(job.getId())) {
             return;
         }
 
-        jobThreads.put(job.getId(), Thread.currentThread());
+        runningJobs.put(job.getId(), new RunningJob(job, Thread.currentThread()));
         Instant start = Instant.now();
 
         try {
@@ -68,23 +68,21 @@ public class JobManager {
 
             job.setState(JobState.RUNNING);
             job.setMessage("Running");
-            reportProgress(job);
+            saveAndReportProgress(job);
 
             job.run();
 
-            job = jobStore.get(job.getId());
             if (job.getState() == JobState.RUNNING) {
                 job.setState(JobState.SUCCESSFUL);
                 job.setMessage("Success");
             }
         }  catch (Exception e) {
-            job = jobStore.get(job.getId());
             if (job.getState() == JobState.RUNNING) {
                 job.setState(JobState.FAILED);
                 job.setMessage("Failed: "  + e.getMessage());
             }
         } finally {
-            jobThreads.remove(job.getId());
+            runningJobs.remove(job.getId());
             if (job.isHeavyWeight()) {
                 heavyWeightJobCount--;
             }
@@ -101,9 +99,13 @@ public class JobManager {
                 job.setDuration(job.getDuration().plus(duration));
             }
 
-            jobStore.save(job);
-            reportProgress(job);
+            saveAndReportProgress(job);
         }
+    }
+
+    private void saveAndReportProgress(Job<?> job) {
+        jobStore.save(job);
+        reportProgress(job);
     }
 
     public void reportProgress(Job<?> job) {
@@ -127,9 +129,10 @@ public class JobManager {
         job.setMessage("Canceling");
         jobStore.save(job);
 
-        Thread thread = jobThreads.get(jobId);
-        if (thread != null) {
-            thread.interrupt();
+        RunningJob runningJob = runningJobs.get(jobId);
+        if (runningJob != null) {
+            runningJob.job.setState(JobState.CANCELED);
+            runningJob.thread.interrupt();
         }
     }
 
@@ -150,4 +153,6 @@ public class JobManager {
         log.info("JobRunner terminated: {}", jobRunner.awaitTermination(1, TimeUnit.MINUTES));
         log.info("JobExecutor terminated: {}", jobExecutor.awaitTermination(1, TimeUnit.MINUTES));
     }
+
+    private record RunningJob(Job<?> job, Thread thread) {}
 }
