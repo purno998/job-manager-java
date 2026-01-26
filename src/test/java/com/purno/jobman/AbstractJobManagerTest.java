@@ -29,7 +29,7 @@ abstract class AbstractJobManagerTest {
     void setUp() {
         jobStore = createJobStore();
         progressConsumer = this::logProgress;
-        jobManager = new JobManager(jobStore, progressConsumer, 10);
+        jobManager = new JobManager(jobStore, progressConsumer, 10, 1);
     }
 
     @AfterEach
@@ -46,7 +46,7 @@ abstract class AbstractJobManagerTest {
     private void waitForJob(long jobId, JobState targetState) {
         JobState state = JobState.INIT;
         while (state != targetState) {
-            Thread.sleep(7000);
+            Thread.sleep(3000);
 
             List<Job<?>> logs = progressMap.get(jobId);
             state = logs == null || logs.isEmpty()
@@ -81,11 +81,12 @@ abstract class AbstractJobManagerTest {
             jobManager.add(job);
         }
 
-        Thread.sleep(8000);
+        Thread.sleep(4000);
 
         // Check that count of jobs in WAITING/RUNNING does not exceed limit
         long activeHeavyJobs = jobStore.getAll().stream()
-                .filter(j -> j.isHeavyWeight() && (j.getState() == JobState.RUNNING || j.getState() == JobState.WAITING))
+                .filter(j -> j.isHeavyWeight() &&
+                        (j.getState() == JobState.RUNNING || j.getState() == JobState.WAITING))
                 .count();
 
         assertTrue(activeHeavyJobs <= 10);

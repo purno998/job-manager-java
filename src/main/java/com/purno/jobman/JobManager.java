@@ -20,14 +20,18 @@ public class JobManager {
     private final Map<Long, RunningJob> runningJobs = new ConcurrentHashMap<>();
     private int heavyWeightJobCount = 0;
 
-    public JobManager(JobStore jobStore, Consumer<Job<?>> progressConsumer, int heavyWeightJobLimit) {
+    public JobManager(JobStore jobStore,
+                      Consumer<Job<?>> progressConsumer,
+                      int heavyWeightJobLimit,
+                      int schedulerDelayInSeconds) {
         this.jobStore = jobStore == null ? new InMemoryJobStore() : jobStore;
         this.progressConsumer = progressConsumer == null ? this::logProgress : progressConsumer;
         this.heavyWeightJobLimit = heavyWeightJobLimit > 0
                 ? heavyWeightJobLimit
                 : Runtime.getRuntime().availableProcessors();
+        schedulerDelayInSeconds = schedulerDelayInSeconds > 0 ? schedulerDelayInSeconds : 5;
 
-        jobRunner.scheduleWithFixedDelay(this::run, 0, 5, TimeUnit.SECONDS);
+        jobRunner.scheduleWithFixedDelay(this::run, 0, schedulerDelayInSeconds, TimeUnit.SECONDS);
     }
 
     private void logProgress(Job<?> job) {
